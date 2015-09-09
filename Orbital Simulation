@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<style type="text/css">
+		body
+		{
+			background-color:black;
+			width:;
+			height:;
+			text-align: center;
+		}
+		#NavBar
+		{
+			background-color:blue;
+			width:80%;
+			height:5%;
+			margin-right: 10%;
+			margin-left: 10%;
+		}
+		.NavOption
+		{
+			background-color:gray;
+			width:20%;
+			height:100%;
+			margin-right:2%;
+			margin-left:2s%;
+			display:inline-block;
+
+			/* No selection options */
+			-webkit-touch-callout: none;
+			-webkit-user-select: none;
+			-khtml-user-select: none;
+			-moz-user-select: none;
+			-ms-user-select: none;
+			user-select: none;
+		}
+		#DrawMain
+		{
+			background-color: black;
+			width:90%;
+			height:70%;
+			margin-bottom: 5%;
+		}
+	</style>
+</head>
+<body>
+	<div id="NavBar">
+		<span class="NavOption" functionality="AddAsteroid">Add Asteroids</span>
+		<span class="NavOption" functionality="AddPlanet">Add Planet</span>
+		<span class="NavOption" functionality="ShowPlanetTrails">Show Planet Trails</span>
+		<span class="NavOption" functionality="ShowAsteroidTrails">Show Asteroid Trails</span>
+	</div>
+	<div>
+		<canvas id="DrawMain" addactive=false></canvas>
+	</div>
+</body>
+<script>
+	//TODO: Multiple draw layers and alpha in image rendering
+	// - Multiple draw layers are to make sure that non-trail entities don't overwrite existing trails
+	// - Alpha layer in image rendering to ensure that images don't draw black boxes (or any other color) on top of existing trails
+
+	function GetDimensions()
+	{
+		var WindowWidth = window.innerWidth || 
+						  document.documentElement.clientWidth||
+						  document.body.clientWidth;
+		var WindowHeight = (window.innerHeight|| 
+							document.documentElement.clientHeight||
+							document.body.clientHeight);
+		return {Width:WindowWidth, Height:WindowHeight};
+	}
+
+	function DrawOrbitalObjects(Objects, Asteroids, Context)
+	{
+		for(var Index = 0;
+			Index < Objects.length;
+			Index++)
+		{
+			//TODO: things to have: Struct of Images, with image dimensions, organized by type of image, mass, etc
+
+			if(Index == 0)
+			{
+				DrawContext.drawImage(SunImage, Objects[Index].Position.X - 10, Objects[Index].Position.Y - 7, 20, 15);
+			}
+			else
+			{
+				Context.fillStyle = "#FFFFFF";
+				Context.fillRect(Objects[Index].Position.X - 2, Objects[Index].Position.Y - 2, 3,3);
+			}
+		}
+		for(var Index = 0;
+			Index < Asteroids.length;
+			Index++)
+		{
+			Context.fillStyle = "#FFFFFF";
+			Context.fillRect(Asteroids[Index].Position.X, Asteroids[Index].Position.Y, 1, 1);
+		}
+	}
+
+	function ClearObjects(Objects, Asteroids, Context)
+	{
+		for(var Index = 0;
+			Index < Objects.length;
+			Index++)
+		{
+			//TODO: things to have: Struct of Images, with image dimensions, organized by type of image, mass, etc
+			if(Index == 0)
+			{
+				Context.fillStyle = "#000000";
+				Context.fillRect(Objects[Index].Position.X - 10, Objects[Index].Position.Y - 7, 20, 15);
+			}
+			else
+			{
+				if(PlanetTrailsActive == false)
+				{
+					Context.fillStyle = "#000000";
+					Context.fillRect(Objects[Index].Position.X - 3, Objects[Index].Position.Y - 3, 5,5);
+				}
+			}
+		}
+		for(var Index = 0;
+			Index < Asteroids.length;
+			Index++)
+		{
+			if(AsteroidTrailsActive == false)
+			{
+				Context.fillStyle = "#000000";
+				Context.fillRect(Asteroids[Index].Position.X-1, Asteroids[Index].Position.Y-1, 3, 3);
+			}
+		}	
+	}
+
+	function GetForceBetweenObjects(O1, O2)
+	{
+		//will tweak later
+		var GRAVITATIONAL_CONSTANT = 0.1;
+
+		var DeltaPositionVector = {X: O2.Position.X - O1.Position.X, Y: O2.Position.Y - O1.Position.Y};
+		var DeltaPositionScalar = Math.sqrt(DeltaPositionVector.X * DeltaPositionVector.X + DeltaPositionVector.Y * DeltaPositionVector.Y);
+		var ForceScalar = (GRAVITATIONAL_CONSTANT * O1.Mass * O2.Mass) / (DeltaPositionVector.X*DeltaPositionVector.X + DeltaPositionVector.Y*DeltaPositionVector.Y);
+		
+		var ForceVector = {X: ForceScalar * DeltaPositionVector.X / DeltaPositionScalar, Y: ForceScalar * DeltaPositionVector.Y / DeltaPositionScalar};
+		return ForceVector;
+	}
+
+	function ResolveForces(Objects, Asteroids, SunObject)
+	{
+		var ForceOnSun = {X: 0, Y: 0};
+		for(var Index = 0;
+			Index < Objects.length;
+			Index++)
+		{
+			var ObjToSunForce =  GetForceBetweenObjects(SunObject, Objects[Index]);
+			ForceOnSun.X += ObjToSunForce.X;
+			ForceOnSun.Y += ObjToSunForce.Y;
+
+			var ForceOnObject = {X: -ObjToSunForce.X, Y: -ObjToSunForce.Y};
+			for(var SubIndex = 0;
+				SubIndex < Objects.length;
+				SubIndex++)
+			{
+				if(SubIndex != Index)
+				{
+					var ObjToObjForce = GetForceBetweenObjects(Objects[Index],Objects[SubIndex]);
+
+					ForceOnObject.X += ObjToObjForce.X;
+					ForceOnObject.Y += ObjToObjForce.Y;
+				}
+			}
+
+			var ChangeInVelocity = {X: ForceOnObject.X/Objects[Index].Mass,Y: ForceOnObject.Y/Objects[Index].Mass};
+
+			Objects[Index].Velocity.X += ChangeInVelocity.X;
+			Objects[Index].Velocity.Y += ChangeInVelocity.Y;
+		}
+
+		for(var Index = 0;
+			Index < Asteroids.length;
+			Index++)
+		{
+			var ObjToAsteroidForce = {X: 0, Y: 0};
+			var Force = 0
+			for(var SubIndex = 0;
+				SubIndex < Objects.length;
+				SubIndex++)
+			{
+				Force = GetForceBetweenObjects(Asteroids[Index], Objects[SubIndex]);
+				ObjToAsteroidForce.X += Force.X;
+				ObjToAsteroidForce.Y += Force.Y;
+			}
+
+			Force = GetForceBetweenObjects(Asteroids[Index], SunObject);
+			ObjToAsteroidForce.X += Force.X;
+			ObjToAsteroidForce.Y += Force.Y;
+
+			var ChangeInVelocity = {X: ObjToAsteroidForce.X / Asteroids[Index].Mass, Y: ObjToAsteroidForce.Y / Asteroids[Index].Mass}
+		
+			Asteroids[Index].Velocity.X += ChangeInVelocity.X;
+			Asteroids[Index].Velocity.Y += ChangeInVelocity.Y;
+		}
+		
+
+		var ChangeInVelocity = {X: ForceOnSun.X/SunObject.Mass, Y: ForceOnSun.Y/SunObject.Mass};
+		SunObject.Velocity.X += ChangeInVelocity.X;
+		SunObject.Velocity.Y += ChangeInVelocity.Y;
+	}
+
+	function UpdatePositions(Objects,Asteroids, SunObject)
+	{
+		for(var Index = 0;
+			Index < Objects.length;
+			Index++)
+		{
+			Objects[Index].Position.X += Objects[Index].Velocity.X;
+			Objects[Index].Position.Y += Objects[Index].Velocity.Y;
+		}
+
+		for(var Index = 0;
+			Index < Asteroids.length;
+			Index++)
+		{
+			Asteroids[Index].Position.X += Asteroids[Index].Velocity.X;
+			Asteroids[Index].Position.Y += Asteroids[Index].Velocity.Y;
+		}
+
+		SunObject.Position.X += SunObject.Velocity.X;
+		SunObject.Position.Y += SunObject.Velocity.Y;
+	}
+
+	WindowDimensions = GetDimensions();
+	document.body.style.width = String(WindowDimensions.Width) + "px";
+	document.body.style.height = String(WindowDimensions.Height) + "px";
+
+	var DrawMain = document.getElementById("DrawMain");
+	var DrawContext = DrawMain.getContext("2d");
+	DrawContext.globalCompositeOperation = 'lighten';
+	//Multiply the width and the height by 0.9 and 0.7 respectively 
+	//because the CSS resizes these dimensions by this amount
+	DrawMain.width = WindowDimensions.Width * 0.9;
+	DrawMain.height = WindowDimensions.Height * 0.9;
+
+	CanvasOffset = {X: (WindowDimensions.Width - DrawMain.width) / 2, Y: document.getElementById("NavBar").clientHeight};
+
+	DrawMain.draggable = false;
+
+	var OrbitalObjects = [];
+	var TempOrbitalObject = {Position: {X: 0, Y: 0}, Velocity: {X: 0, Y: 0}, Mass: 10};
+	var Sun = {Position: {X: DrawMain.width/2, Y: DrawMain.height/2}, Velocity: {X: .1155, Y: 0}, Mass: 1000};
+	var FrameCount = 0;
+	var PlanetTrailsActive = false;
+	var AsteroidTrailsActive = false;
+	var Asteroids = [];
+
+	var SunImage = new Image;
+	SunImage.src = "http://www.noaa.gov/features/03_protecting/images/stereo2010_300.jpg";
+	SunImage.onload = function(){
+		setInterval(function(){
+			DrawContext.fillStyle = "#000000";
+			ClearObjects(OrbitalObjects,Asteroids,DrawContext);
+			DrawContext.fillRect(Sun.Position.X - 20, Sun.Position.Y - 15, 40, 30);
+
+			ResolveForces(OrbitalObjects, Asteroids, Sun);
+			UpdatePositions(OrbitalObjects, Asteroids, Sun);
+
+			DrawContext.drawImage(SunImage, Sun.Position.X - 20, Sun.Position.Y - 15, 40, 30);
+			DrawOrbitalObjects(OrbitalObjects, Asteroids, DrawContext);
+		}, 30);
+	};
+
+	OrbitalObjects.push({Position: {X:DrawMain.width/2, Y:DrawMain.height/2 - 200}, Velocity: {X:-0.7, Y:0}, Mass: 100});
+	OrbitalObjects.push({Position: {X:DrawMain.width/2, Y:DrawMain.height/2 - 185}, Velocity: {X: -1.429, Y:0}, Mass: 0.2});
+	OrbitalObjects.push({Position: {X:DrawMain.width/2, Y:DrawMain.height/2 - 170}, Velocity: {X: -1.3033, Y:0}, Mass: 1});
+	OrbitalObjects.push({Position: {X:DrawMain.width/2, Y:DrawMain.height/2 - 60}, Velocity: {X: -1.2, Y:0}, Mass: 8});
+	OrbitalObjects.push({Position: {X:DrawMain.width/2, Y:DrawMain.height/2 - 25}, Velocity: {X: -2, Y:0}, Mass: 16});
+	OrbitalObjects.push({Position: {X:DrawMain.width/2, Y:DrawMain.height/2 - 65}, Velocity: {X: -1.58, Y:0}, Mass: 1.2});
+
+	function AddAsteroid(Index, NavOptions)
+	{
+		var NavOption = NavOptions[Index];
+
+		NavOption.onclick = function(){ 
+			var AddActive = DrawMain.getAttribute("addactive");
+ 
+			if(!(DrawMain.onmousedown && DrawMain.onmousemove && DrawMain.onmouseup))
+			{
+				var MousePosition = {X: 0, Y: 0};
+
+				ResetNavOptions(NavOptions);
+				NavOption.style.backgroundColor = "green"; 
+				DrawMain.onmousedown = function(event)
+				{
+					MousePosition.X = event.clientX - CanvasOffset.X;
+					MousePosition.Y = event.clientY - CanvasOffset.Y;
+					Asteroids.push({Position: {X:MousePosition.X + Math.random * 10 - 5, Y:MousePosition.Y + Math.random * 10 - 5}, Velocity: {X:Math.random()*2 - 1, Y:Math.random()*2 - 1}, Mass:0.01});
+					AddActive = true;
+				};
+				DrawMain.onmousemove = function(event)
+				{
+					MousePosition.X = event.clientX - CanvasOffset.X;
+					MousePosition.Y = event.clientY - CanvasOffset.Y;
+					if(AddActive == true)
+					{
+						Asteroids.push({Position: {X:MousePosition.X, Y:MousePosition.Y}, Velocity: {X:Math.random()*2 - 1, Y:Math.random()*2 - 1}, Mass:0.01});
+					}
+				};
+				DrawMain.onmouseup = function(event)
+				{
+					AddActive = false;
+				};
+			}
+			else
+			{
+				NavOption.style.backgroundColor = "gray"; 
+				DrawMain.onmousedown = null;
+				DrawMain.onmousemove = null;
+				DrawMain.onmouseup = null;
+			}
+		};	
+	}
+
+	function VectorToScalar(Vector)
+	{
+		var Scalar = Math.sqrt(Vector.X * Vector.X + Vector.Y * Vector.Y);
+		return Scalar;
+	}
+
+	function ResetNavOptions(NavOptions)
+	{
+		var Index = 0
+		for(Index;
+			Index < NavOptions.length;
+			Index++)
+		{
+			NavOptions[Index].style.backgroundColor = "gray";
+		}
+		DrawMain.onmousedown = null;
+		DrawMain.onmouseup = null;
+		DrawMain.onwheel = null;
+		DrawMain.onmousemove = null;
+	}
+
+	function AddPlanet(Index, NavOptions)
+	{
+		var NavOption = NavOptions[Index];
+		var InputDamping = 25; 
+
+		NavOption.onclick = function(){
+			if(!(DrawMain.onmousedown && DrawMain.onmouseup))
+			{
+				ResetNavOptions(NavOptions);
+				NavOption.style.backgroundColor = "green";
+				
+				DrawMain.onmousedown = function(event)
+				{
+					TempOrbitalObject.Position.X = event.clientX - CanvasOffset.X;
+					TempOrbitalObject.Position.Y = event.clientY - CanvasOffset.Y;
+				};
+				DrawMain.onmouseup = function(event)
+				{
+					var EndingPosition = {X: 0, Y: 0};
+					EndingPosition.X = event.clientX - CanvasOffset.X;
+					EndingPosition.Y = event.clientY - CanvasOffset.Y;
+
+					var MouseVector = {X: EndingPosition.X - TempOrbitalObject.Position.X, Y: EndingPosition.Y - TempOrbitalObject.Position.Y};
+					var MouseScalar = VectorToScalar(MouseVector);
+
+					var VelocityUnit = {X: 0, Y: 0};
+					if(Math.abs(MouseScalar) >= 0.005)
+					{
+						VelocityUnit = {X: MouseVector.X / MouseScalar, Y: MouseVector.Y / MouseScalar};
+					}
+					else
+					{
+						MouseScalar = 0;
+					}
+
+					TempOrbitalObject.Velocity.X = VelocityUnit.X * MouseScalar / InputDamping;
+					TempOrbitalObject.Velocity.Y = VelocityUnit.Y * MouseScalar / InputDamping;
+					OrbitalObjects.push({Position: {X: TempOrbitalObject.Position.X, Y: TempOrbitalObject.Position.Y}, 
+										 Velocity: {X: TempOrbitalObject.Velocity.X, Y: TempOrbitalObject.Velocity.Y}, 
+										 Mass: TempOrbitalObject.Mass});
+
+					TempOrbitalObject = {Position: {X: 0, Y: 0}, Velocity: {X: 0, Y: 0}, Mass: 10};
+				};
+			}
+			else
+			{
+				NavOption.style.backgroundColor = "gray";
+				DrawMain.onmousedown = null;
+				DrawMain.onmouseup = null;
+			}
+		};
+	}
+
+	function ShowPlanetTrails(Index, NavOptions, Context)
+	{
+		var NavOption = NavOptions[Index];
+		
+		NavOption.onclick = function(){
+			if(PlanetTrailsActive == false)
+			{
+				NavOption.style.backgroundColor = 'green';
+				PlanetTrailsActive = true;
+			}
+			else
+			{
+				Context.fillStyle = '#000000';
+				Context.fillRect(0,0,DrawMain.width, DrawMain.height);
+				NavOption.style.backgroundColor = 'grey';
+				PlanetTrailsActive = false;
+			}
+		};
+	}
+
+	function ShowAsteroidTrails(Index, NavOptions, Context)
+	{
+		var NavOption = NavOptions[Index];
+		
+		NavOption.onclick = function(){
+			if(AsteroidTrailsActive == false)
+			{
+				NavOption.style.backgroundColor = 'green';
+				AsteroidTrailsActive = true;
+			}
+			else
+			{
+				Context.fillStyle = '#000000';
+				
+				Context.fillRect(0,0,DrawMain.width, DrawMain.height);
+
+				NavOption.style.backgroundColor = 'grey';
+				AsteroidTrailsActive = false;
+			}
+		};
+	}
+
+	var NavOptions = document.getElementsByClassName("NavOption");
+	for(var Index = 0;
+		Index < NavOptions.length;
+		Index++)
+	{
+		switch(NavOptions[Index].getAttribute("functionality"))
+		{
+			case "AddAsteroid":
+			{
+				AddAsteroid(Index, NavOptions);
+				break;
+			}
+			case "AddPlanet":
+			{
+				AddPlanet(Index, NavOptions);
+				break;
+			}
+			case "ShowPlanetTrails":
+			{
+				ShowPlanetTrails(Index, NavOptions, DrawContext);
+				break;
+			}
+			case "ShowAsteroidTrails":
+			{
+				ShowAsteroidTrails(Index, NavOptions, DrawContext);
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+
+</script>
+</html>
