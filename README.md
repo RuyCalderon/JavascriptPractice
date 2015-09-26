@@ -1,2 +1,2 @@
-# Jevascript
+# Javascript
 Javascript practice
